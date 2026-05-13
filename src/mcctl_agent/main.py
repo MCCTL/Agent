@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import websockets
+from websockets.exceptions import InvalidStatus
 
 from mcctl_agent.api import claim_pairing_session, create_pairing_session, websocket_url
 from mcctl_agent.config import AgentConfig, default_config_path, resolve_api_base_url
@@ -41,7 +42,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="mcctl local agent")
     parser.add_argument("--api-url", default=resolve_api_base_url())
     parser.add_argument("--config", type=Path, default=default_config_path())
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("reset", help="clear saved agent token and device information")
     args = parser.parse_args()
+
+    if args.command == "reset":
+        reset_agent_config(args.config)
+        return
 
     config = AgentConfig.load(args.config)
     config.api_base_url = args.api_url
@@ -56,7 +63,21 @@ def main() -> None:
 async def run_agent(config: AgentConfig, config_path: Path) -> None:
     if not config.agent_token:
         await pair_agent(config, config_path)
-    await connect_websocket(config)
+    await connect_websocket(config, config_path)
+
+
+def reset_agent_config(config_path: Path) -> bool:
+    if not config_path.exists():
+        print(f"No saved MCCTL Agent config found at {config_path}.")
+        return False
+
+    config = AgentConfig.load(config_path)
+    config.agent_token = None
+    config.device_id = None
+    config.save(config_path)
+    print(f"Cleared saved MCCTL Agent token and device information at {config_path}.")
+    print("Start mcctl-agent again to create a new pairing URL.")
+    return True
 
 
 async def pair_agent(config: AgentConfig, config_path: Path) -> None:
@@ -91,7 +112,7 @@ def maybe_open_browser(url: str) -> None:
         return
 
 
-async def connect_websocket(config: AgentConfig) -> None:
+async def connect_websocket(config: AgentConfig, config_path: Path) -> None:
     if not config.agent_token:
         raise RuntimeError("Agent token is missing.")
 
@@ -126,8 +147,26 @@ async def connect_websocket(config: AgentConfig) -> None:
                         task.cancel()
                     await asyncio.gather(heartbeat_task, *response_tasks, return_exceptions=True)
         except Exception as exc:
+            if is_auth_rejection(exc):
+                print(
+                    "Connection rejected with HTTP 401/403. The saved agent token may be invalid.",
+                    file=sys.stderr,
+                )
+                print("Run `mcctl-agent reset`, then start the agent again to re-pair this device.", file=sys.stderr)
+                print(f"Config path: {config_path}", file=sys.stderr)
+                return
             print(f"Connection lost: {exc}", file=sys.stderr)
             await asyncio.sleep(5)
+
+
+def is_auth_rejection(exc: Exception) -> bool:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
+    if status_code in {401, 403}:
+        return True
+    if isinstance(exc, InvalidStatus):
+        return "401" in str(exc) or "403" in str(exc)
+    return "HTTP 401" in str(exc) or "HTTP 403" in str(exc)
 
 
 async def send_heartbeats(websocket, send_lock: asyncio.Lock) -> None:
