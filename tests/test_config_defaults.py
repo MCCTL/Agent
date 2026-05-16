@@ -65,7 +65,7 @@ def test_insecure_api_warning_is_only_for_non_https(capsys):
 
 
 def test_readme_keeps_localhost_out_of_normal_install_steps():
-    readme = Path("README.md").read_text(encoding="utf-8")
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
     public_section = readme.split("## Developer API Override", 1)[0]
 
     assert "127.0.0.1" not in public_section
