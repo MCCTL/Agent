@@ -90,6 +90,7 @@ async def install_uploaded_plugin(payload: dict[str, Any]) -> dict[str, Any]:
         "filename": target_path.name,
         "status": "installed",
         "restart_required": True,
+        "pending_state": "restart_required",
         "message": "Plugin installed. Restart the server to apply the change.",
     }
 
@@ -104,6 +105,7 @@ def enable_plugin(payload: dict[str, Any]) -> dict[str, Any]:
             "filename": source.name,
             "status": "enabled",
             "restart_required": True,
+            "pending_state": "restart_required",
             "message": "Plugin is already enabled.",
         }
     target = source.with_name(source.name.removesuffix(".disabled"))
@@ -115,6 +117,7 @@ def enable_plugin(payload: dict[str, Any]) -> dict[str, Any]:
         "filename": target.name,
         "status": "enabled",
         "restart_required": True,
+        "pending_state": "restart_required",
         "message": "Plugin enabled. Restart the server to apply the change.",
     }
 
@@ -129,6 +132,7 @@ def disable_plugin(payload: dict[str, Any]) -> dict[str, Any]:
             "filename": source.name,
             "status": "disabled",
             "restart_required": True,
+            "pending_state": "restart_required",
             "message": "Plugin is already disabled.",
         }
     if not source.name.endswith(".jar"):
@@ -142,6 +146,7 @@ def disable_plugin(payload: dict[str, Any]) -> dict[str, Any]:
         "filename": target.name,
         "status": "disabled",
         "restart_required": True,
+        "pending_state": "restart_required",
         "message": "Plugin disabled. Restart the server to apply the change.",
     }
 
@@ -270,7 +275,8 @@ def _plugin_info(path: Path) -> dict[str, Any]:
         "enabled": enabled,
         "updated_at": _format_timestamp(path.stat().st_mtime),
         "size_bytes": path.stat().st_size,
-        "restart_required": True,
+        "restart_required": False,
+        "pending_state": "none",
         "metadata_error": metadata_error,
     }
 

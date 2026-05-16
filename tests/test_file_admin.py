@@ -40,6 +40,8 @@ def test_plugin_jar_detection_and_metadata(tmp_path: Path) -> None:
     disabled = next(item for item in result["plugins"] if item["filename"] == "Disabled.jar.disabled")
     assert enabled["display_name"] == "ExamplePlugin"
     assert enabled["enabled"] is True
+    assert enabled["restart_required"] is False
+    assert enabled["pending_state"] == "none"
     assert disabled["enabled"] is False
 
 
@@ -52,7 +54,9 @@ def test_plugin_enable_disable_uses_rename(tmp_path: Path) -> None:
     enabled = enable_plugin({"root_path": str(tmp_path), "plugin_id": "Example.jar.disabled"})
 
     assert disabled["filename"] == "Example.jar.disabled"
+    assert disabled["pending_state"] == "restart_required"
     assert enabled["filename"] == "Example.jar"
+    assert enabled["pending_state"] == "restart_required"
     assert (plugins / "Example.jar").exists()
 
 
