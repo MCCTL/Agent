@@ -1,0 +1,37 @@
+# Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+**/__pycache__/**
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Build and distribution artifacts
+build/
+dist/
+*.whl
+*.tar.gz
+
+# Local runtime and secrets
+.env
+.env.*
+*.log
+
+# Repomix output files
+repomix-output.*
+repomix-*.xml
+repomix-*.txt
+
+# Binary or local artifacts
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.ico
+*.gif
+*.zip
+*.sqlite
+*.db
