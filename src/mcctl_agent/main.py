@@ -8,12 +8,19 @@ import platform
 import sys
 import webbrowser
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import websockets
 from websockets.exceptions import InvalidStatus
 
 from mcctl_agent.api import claim_pairing_session, create_pairing_session, websocket_url
+from mcctl_agent.autostart import (
+    AutostartError,
+    install_windows_autostart,
+    uninstall_windows_autostart,
+    windows_autostart_status,
+)
 from mcctl_agent.config import AgentConfig, default_config_path, resolve_api_base_url
 from mcctl_agent.file_admin import (
     create_manual_backup,
@@ -38,21 +45,41 @@ runtime_manager = ServerRuntimeManager()
 operation_registry = OperationRegistry()
 
 
+def agent_version() -> str:
+    try:
+        return version("mcctl-agent")
+    except PackageNotFoundError:
+        return "0.0.0-dev"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="mcctl local agent")
     parser.add_argument("--api-url", default=resolve_api_base_url())
     parser.add_argument("--config", type=Path, default=default_config_path())
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("reset", help="clear saved agent token and device information")
+    subparsers.add_parser("status", help="show local agent configuration without printing secrets")
+    autostart_parser = subparsers.add_parser("autostart", help="manage Windows logon autostart")
+    autostart_subparsers = autostart_parser.add_subparsers(dest="autostart_command", required=True)
+    autostart_subparsers.add_parser("install", help="install Windows Task Scheduler autostart")
+    autostart_subparsers.add_parser("uninstall", help="remove Windows Task Scheduler autostart")
+    autostart_subparsers.add_parser("status", help="show Windows autostart status")
     args = parser.parse_args()
 
     if args.command == "reset":
         reset_agent_config(args.config)
         return
+    if args.command == "status":
+        print_agent_status(args.config, args.api_url)
+        return
+    if args.command == "autostart":
+        handle_autostart(args.autostart_command)
+        return
 
     config = AgentConfig.load(args.config)
     config.api_base_url = args.api_url
     config.save(args.config)
+    warn_for_insecure_api(config.api_base_url)
 
     try:
         asyncio.run(run_agent(config, args.config))
@@ -78,6 +105,44 @@ def reset_agent_config(config_path: Path) -> bool:
     print(f"Cleared saved MCCTL Agent token and device information at {config_path}.")
     print("Start mcctl-agent again to create a new pairing URL.")
     return True
+
+
+def print_agent_status(config_path: Path, api_base_url: str) -> None:
+    config = AgentConfig.load(config_path)
+    configured = bool(config.agent_token and config.device_id)
+    print("MCCTL Agent status")
+    print(f"Version: {agent_version()}")
+    print(f"Configured: {'yes' if configured else 'no'}")
+    print(f"Device ID: {config.device_id or 'not paired'}")
+    print(f"API URL: {api_base_url}")
+    print(f"Config path: {config_path}")
+    print(f"Token saved: {'yes' if config.agent_token else 'no'}")
+    print("Token value: hidden")
+
+
+def handle_autostart(command: str) -> None:
+    try:
+        if command == "install":
+            result = install_windows_autostart()
+        elif command == "uninstall":
+            result = uninstall_windows_autostart()
+        elif command == "status":
+            result = windows_autostart_status()
+        else:
+            raise AutostartError(f"Unknown autostart command: {command}")
+    except AutostartError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
+    print(result.message)
+
+
+def warn_for_insecure_api(api_base_url: str) -> None:
+    if api_base_url.startswith("https://"):
+        return
+    print(
+        "Warning: MCCTL_API_BASE_URL is not HTTPS. Use this only for local development.",
+        file=sys.stderr,
+    )
 
 
 async def pair_agent(config: AgentConfig, config_path: Path) -> None:
@@ -118,14 +183,19 @@ async def connect_websocket(config: AgentConfig, config_path: Path) -> None:
 
     url = websocket_url(config.api_base_url)
     print("Connecting to MCCTL API WebSocket.")
+    backoff_seconds = 2
     while True:
         try:
             async with websockets.connect(
                 url,
-                additional_headers={"X-MCCTL-Agent-Token": config.agent_token},
+                additional_headers={
+                    "X-MCCTL-Agent-Token": config.agent_token,
+                    "X-MCCTL-Agent-Version": agent_version(),
+                },
                 ping_interval=None,
             ) as websocket:
                 print("Agent connected.")
+                backoff_seconds = 2
                 send_lock = asyncio.Lock()
 
                 async def emit_event(event: dict) -> None:
@@ -156,7 +226,8 @@ async def connect_websocket(config: AgentConfig, config_path: Path) -> None:
                 print(f"Config path: {config_path}", file=sys.stderr)
                 return
             print(f"Connection lost: {exc}", file=sys.stderr)
-            await asyncio.sleep(5)
+            await asyncio.sleep(backoff_seconds)
+            backoff_seconds = min(backoff_seconds * 2, 60)
 
 
 def is_auth_rejection(exc: Exception) -> bool:

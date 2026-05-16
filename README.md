@@ -28,6 +28,27 @@ After opening a new PowerShell window, this should work:
 mcctl-agent
 ```
 
+### Windows autostart
+
+The beta agent can create a per-user Task Scheduler entry that starts the agent when you log in:
+
+```powershell
+mcctl-agent autostart install
+mcctl-agent autostart status
+```
+
+Remove the task:
+
+```powershell
+mcctl-agent autostart uninstall
+```
+
+If `mcctl-agent` is not on PATH in the current PowerShell, use the absolute path:
+
+```powershell
+& "$env:USERPROFILE\.local\bin\mcctl-agent.exe" autostart install
+```
+
 ## Linux
 
 Ubuntu / Debian:
@@ -64,6 +85,12 @@ source ~/.bashrc
 
 Normally, the agent connects to `https://api.mcctl.com` automatically. Users do not need to configure the API URL.
 
+Check the local configuration without printing secrets:
+
+```bash
+mcctl-agent status
+```
+
 ## Pairing
 
 When the agent starts without a saved token, it prints a pairing URL and code.
@@ -90,6 +117,8 @@ Default config paths:
 
 - Windows: `%APPDATA%\mcctl\agent.json`
 - Linux: `~/.config/mcctl/agent.json`
+
+`mcctl-agent reset` clears only the saved token and device id. It keeps the local agent fingerprint and API URL.
 
 Manual removal if needed:
 
