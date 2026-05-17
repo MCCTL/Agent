@@ -10,6 +10,7 @@ import webbrowser
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Any
 
 import websockets
 from websockets.exceptions import InvalidStatus
@@ -50,6 +51,16 @@ from mcctl_agent.server_setup import (
     list_server_builds,
     validate_server_directory,
 )
+from mcctl_agent.service import (
+    ServiceError,
+    install_service,
+    restart_service,
+    service_status,
+    service_summary,
+    start_service,
+    stop_service,
+    uninstall_service,
+)
 
 
 runtime_manager = ServerRuntimeManager()
@@ -77,6 +88,14 @@ def main() -> None:
     autostart_subparsers.add_parser("install", help="install Windows Task Scheduler autostart")
     autostart_subparsers.add_parser("uninstall", help="remove Windows Task Scheduler autostart")
     autostart_subparsers.add_parser("status", help="show Windows autostart status")
+    service_parser = subparsers.add_parser("service", help="manage Windows Service background mode")
+    service_subparsers = service_parser.add_subparsers(dest="service_command", required=True)
+    service_subparsers.add_parser("install", help="install Windows Service")
+    service_subparsers.add_parser("start", help="start Windows Service")
+    service_subparsers.add_parser("stop", help="stop Windows Service")
+    service_subparsers.add_parser("restart", help="restart Windows Service")
+    service_subparsers.add_parser("status", help="show Windows Service status")
+    service_subparsers.add_parser("uninstall", help="uninstall Windows Service")
     args = parser.parse_args()
 
     if args.command == "version":
@@ -93,6 +112,9 @@ def main() -> None:
         return
     if args.command == "autostart":
         handle_autostart(args.autostart_command)
+        return
+    if args.command == "service":
+        handle_service(args.service_command)
         return
 
     config = AgentConfig.load(args.config)
@@ -137,6 +159,8 @@ def print_agent_status(config_path: Path, api_base_url: str) -> None:
     print(f"Config path: {config_path}")
     print(f"Token saved: {'yes' if config.agent_token else 'no'}")
     print("Token value: hidden")
+    for line in service_summary():
+        print(line)
 
 
 def print_agent_version() -> None:
@@ -155,10 +179,15 @@ def update_guidance(system: str | None = None) -> str:
                 "py -m pipx install git+https://github.com/MCCTL/Agent.git",
                 '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe"',
                 "",
-                "If Windows autostart is enabled:",
-                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" autostart uninstall',
+                "Recommended Windows Service mode after pairing:",
+                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" service stop',
                 "py -m pipx uninstall mcctl-agent",
                 "py -m pipx install git+https://github.com/MCCTL/Agent.git",
+                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" service install',
+                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" service start',
+                "",
+                "Fallback if administrator rights are unavailable:",
+                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" autostart uninstall',
                 '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" autostart install',
             ]
         )
@@ -203,6 +232,28 @@ def handle_autostart(command: str) -> None:
         else:
             raise AutostartError(f"Unknown autostart command: {command}")
     except AutostartError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
+    print(result.message)
+
+
+def handle_service(command: str) -> None:
+    try:
+        if command == "install":
+            result = install_service()
+        elif command == "start":
+            result = start_service()
+        elif command == "stop":
+            result = stop_service()
+        elif command == "restart":
+            result = restart_service()
+        elif command == "status":
+            result = service_status()
+        elif command == "uninstall":
+            result = uninstall_service()
+        else:
+            raise ServiceError(f"Unknown service command: {command}")
+    except ServiceError as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
     print(result.message)
@@ -433,7 +484,7 @@ async def dispatch_command(command: str, payload: dict) -> dict:
     if command == "create_manual_backup":
         return operation_registry.start(
             "backup create",
-            lambda: asyncio.to_thread(create_manual_backup, payload),
+            lambda: run_backup_operation(payload, kind="manual"),
         )
     if command == "list_backups":
         return list_backups(payload)
@@ -453,7 +504,7 @@ async def dispatch_command(command: str, payload: dict) -> dict:
     if command == "run_scheduled_backup":
         return operation_registry.start(
             "scheduled backup",
-            lambda: asyncio.to_thread(create_manual_backup, payload, kind="scheduled"),
+            lambda: run_backup_operation(payload, kind="scheduled"),
         )
     if command == "get_backup_schedule_state":
         return {"status": "ok", "enabled": bool(payload.get("enabled", False)), "next_run_at": payload.get("next_run_at")}
@@ -484,3 +535,42 @@ async def dispatch_command(command: str, payload: dict) -> dict:
     if command == "get_operation_status":
         return operation_registry.get(str(payload["operation_id"]))
     raise RuntimeError(f"Unknown command: {command}")
+
+
+async def run_backup_operation(payload: dict[str, Any], *, kind: str) -> dict[str, Any]:
+    server_id = str(payload["server_id"])
+    runtime = runtime_manager.runtime(server_id)
+    if runtime.get("status") == "running":
+        return await _run_online_backup(payload, kind=kind)
+    return await asyncio.to_thread(create_manual_backup, payload, kind=kind, mode="cold")
+
+
+async def _run_online_backup(payload: dict[str, Any], *, kind: str) -> dict[str, Any]:
+    server_id = str(payload["server_id"])
+    save_off_sent = False
+    backup_error: BaseException | None = None
+    save_on_error: BaseException | None = None
+
+    try:
+        await runtime_manager.send_command(server_id, "save-off")
+        save_off_sent = True
+        await runtime_manager.send_command(server_id, "save-all flush")
+        await asyncio.sleep(float(payload.get("backup_flush_wait_seconds") or 2.0))
+        return await asyncio.to_thread(create_manual_backup, payload, kind=kind, mode="online")
+    except BaseException as exc:
+        backup_error = exc
+        raise
+    finally:
+        if save_off_sent:
+            try:
+                await runtime_manager.send_command(server_id, "save-on")
+            except BaseException as exc:
+                save_on_error = exc
+        if save_on_error is not None:
+            message = (
+                "保存再開に失敗した可能性があります。コンソールで save-on を実行してください。"
+                f"詳細: {save_on_error}"
+            )
+            if backup_error is not None:
+                message = f"{backup_error} / {message}"
+            raise RuntimeError(message) from save_on_error

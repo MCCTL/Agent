@@ -123,6 +123,98 @@ def test_manual_backup_create_restore_and_delete(tmp_path: Path, monkeypatch: py
     assert deleted["status"] == "deleted"
 
 
+def test_backup_excludes_runtime_directories(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MCCTL_AGENT_DATA_DIR", str(tmp_path / "agent-data"))
+    (tmp_path / "world").mkdir()
+    (tmp_path / "world" / "level.dat").write_text("world", encoding="utf-8")
+    for dirname in ("backups", "logs", "cache", "crash-reports"):
+        (tmp_path / dirname).mkdir()
+        (tmp_path / dirname / "ignored.txt").write_text("ignored", encoding="utf-8")
+    (tmp_path / "session.lock").write_text("lock", encoding="utf-8")
+
+    created = create_manual_backup({"root_path": str(tmp_path), "server_id": "server-1"})
+    archive_path = tmp_path / "agent-data" / "backups" / "server-1" / f"{created['backup']['backup_id']}.zip"
+
+    with zipfile.ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+
+    assert "world/level.dat" in names
+    assert "logs/ignored.txt" not in names
+    assert "cache/ignored.txt" not in names
+    assert "crash-reports/ignored.txt" not in names
+    assert "session.lock" not in names
+
+
+def test_backup_permission_denied_returns_japanese_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MCCTL_AGENT_DATA_DIR", str(tmp_path / "agent-data"))
+
+    def raise_permission(*args, **kwargs):
+        exc = PermissionError("denied")
+        exc.filename = str(tmp_path / "server.properties")
+        raise exc
+
+    monkeypatch.setattr("mcctl_agent.file_admin._write_backup_zip", raise_permission)
+
+    with pytest.raises(RuntimeError, match="バックアップを作成できません"):
+        create_manual_backup({"root_path": str(tmp_path), "server_id": "server-1"})
+
+
+def test_running_server_backup_uses_online_mode_and_save_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def run() -> None:
+        commands: list[str] = []
+
+        class FakeRuntime:
+            def runtime(self, server_id: str) -> dict:
+                return {"server_id": server_id, "status": "running"}
+
+            async def send_command(self, server_id: str, command: str) -> dict:
+                commands.append(command)
+                return {"accepted": True}
+
+        def fake_backup(payload: dict, *, kind: str = "manual", mode: str = "cold") -> dict:
+            return {"backup": {"backup_id": "backup-1", "mode": mode}, "mode": mode}
+
+        original_sleep = asyncio.sleep
+        monkeypatch.setattr(agent_main, "runtime_manager", FakeRuntime())
+        monkeypatch.setattr(agent_main, "create_manual_backup", fake_backup)
+        monkeypatch.setattr(agent_main.asyncio, "sleep", lambda delay: original_sleep(0))
+
+        result = await agent_main.run_backup_operation({"server_id": "server-1", "root_path": "unused"}, kind="manual")
+
+        assert commands == ["save-off", "save-all flush", "save-on"]
+        assert result["backup"]["mode"] == "online"
+
+    asyncio.run(run())
+
+
+def test_online_backup_failure_still_sends_save_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def run() -> None:
+        commands: list[str] = []
+
+        class FakeRuntime:
+            def runtime(self, server_id: str) -> dict:
+                return {"server_id": server_id, "status": "running"}
+
+            async def send_command(self, server_id: str, command: str) -> dict:
+                commands.append(command)
+                return {"accepted": True}
+
+        def fail_backup(payload: dict, *, kind: str = "manual", mode: str = "cold") -> dict:
+            raise RuntimeError("zip failed")
+
+        original_sleep = asyncio.sleep
+        monkeypatch.setattr(agent_main, "runtime_manager", FakeRuntime())
+        monkeypatch.setattr(agent_main, "create_manual_backup", fail_backup)
+        monkeypatch.setattr(agent_main.asyncio, "sleep", lambda delay: original_sleep(0))
+
+        with pytest.raises(RuntimeError, match="zip failed"):
+            await agent_main.run_backup_operation({"server_id": "server-1", "root_path": "unused"}, kind="manual")
+
+        assert commands == ["save-off", "save-all flush", "save-on"]
+
+    asyncio.run(run())
+
+
 def test_operation_registry_tracks_long_running_status() -> None:
     async def run() -> None:
         started = asyncio.Event()
@@ -153,11 +245,16 @@ def test_long_running_backup_does_not_block_other_agent_commands(monkeypatch: py
         started = threading.Event()
         finish = threading.Event()
 
-        def slow_backup(payload: dict) -> dict:
+        def slow_backup(payload: dict, **kwargs: object) -> dict:
             started.set()
             finish.wait(timeout=2)
             return {"backup": {"backup_id": "backup-1"}, "message": "done"}
 
+        class StoppedRuntimeManager:
+            def runtime(self, server_id: str) -> dict:
+                return {"server_id": server_id, "status": "stopped"}
+
+        monkeypatch.setattr(agent_main, "runtime_manager", StoppedRuntimeManager())
         monkeypatch.setattr(agent_main, "create_manual_backup", slow_backup)
         monkeypatch.setattr(agent_main, "list_backups", lambda payload: {"backups": []})
 

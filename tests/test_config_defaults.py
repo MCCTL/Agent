@@ -76,7 +76,17 @@ def test_version_and_update_commands_do_not_print_tokens(capsys):
 
 def test_update_guidance_has_platform_specific_commands():
     assert "py -m pipx install" in update_guidance("Windows")
+    assert "service install" in update_guidance("Windows")
     assert "~/.local/bin/mcctl-agent" in update_guidance("Linux")
+
+
+def test_config_path_can_be_overridden_for_service(monkeypatch, tmp_path):
+    config_path = tmp_path / "service-agent.json"
+    monkeypatch.setenv("MCCTL_AGENT_CONFIG", str(config_path))
+
+    from mcctl_agent.config import default_config_path
+
+    assert default_config_path() == config_path
 
 
 def test_agent_metadata_headers_include_runtime_without_token(monkeypatch):

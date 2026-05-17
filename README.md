@@ -28,19 +28,33 @@ After opening a new PowerShell window, this should work:
 mcctl-agent
 ```
 
-### Windows autostart
+### Windows background service
 
-The beta agent can create a per-user Task Scheduler entry that starts the agent when you log in:
+After the first pairing is complete, the recommended Windows background mode is Windows Service.
+Open PowerShell as Administrator and run:
+
+```powershell
+& "$env:USERPROFILE\.local\bin\mcctl-agent.exe" service install
+& "$env:USERPROFILE\.local\bin\mcctl-agent.exe" service start
+& "$env:USERPROFILE\.local\bin\mcctl-agent.exe" service status
+```
+
+Remove the service:
+
+```powershell
+& "$env:USERPROFILE\.local\bin\mcctl-agent.exe" service stop
+& "$env:USERPROFILE\.local\bin\mcctl-agent.exe" service uninstall
+```
+
+Service installation uses WinSW and requires Administrator rights. The service copies the paired user config into `C:\ProgramData\MCCTL\Agent\agent.json` and uses that path through `MCCTL_AGENT_CONFIG`, so the token value is never printed.
+
+### Windows autostart fallback
+
+If Administrator rights are unavailable, use the per-user Task Scheduler fallback:
 
 ```powershell
 mcctl-agent autostart install
 mcctl-agent autostart status
-```
-
-Remove the task:
-
-```powershell
-mcctl-agent autostart uninstall
 ```
 
 If `mcctl-agent` is not on PATH in the current PowerShell, use the absolute path:

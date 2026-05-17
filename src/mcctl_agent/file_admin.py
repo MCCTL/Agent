@@ -25,8 +25,9 @@ ROOT_EDITABLE_FILES = {
 EDITABLE_DIRS = {"config", "plugins"}
 MAX_TEXT_FILE_BYTES = 512 * 1024
 MAX_PLUGIN_BYTES = 67_108_864
-BACKUP_EXCLUDED_ROOTS = {"backups", "logs", "cache"}
+BACKUP_EXCLUDED_ROOTS = {"backups", "logs", "cache", "crash-reports"}
 BACKUP_EXCLUDED_SUFFIXES = {".tmp", ".part", ".mcctl-upload"}
+BACKUP_EXCLUDED_FILES = {"session.lock", ".ds_store", "thumbs.db", "desktop.ini"}
 
 
 @dataclass(frozen=True)
@@ -202,30 +203,48 @@ def write_editable_file(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def create_manual_backup(payload: dict[str, Any], *, kind: str = "manual") -> dict[str, Any]:
+def create_manual_backup(payload: dict[str, Any], *, kind: str = "manual", mode: str = "cold") -> dict[str, Any]:
     root = _safe_root(payload["root_path"])
     server_id = str(payload["server_id"])
     backup_dir = _backup_dir(server_id)
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError as exc:
+        raise RuntimeError(
+            "バックアップを作成できません。Agent実行ユーザーにバックアップ保存先への書き込み権限がありません。"
+        ) from exc
     timestamp = _timestamp()
     backup_id = f"{kind}-{_safe_id(server_id)}-{timestamp}"
     path = backup_dir / f"{backup_id}.zip"
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for item in root.rglob("*"):
-            if _should_exclude_from_backup(root, item):
-                continue
-            if item.is_file():
-                archive.write(item, item.relative_to(root).as_posix())
+    try:
+        _write_backup_zip(root, path, include_crash_reports=bool(payload.get("include_crash_reports", False)))
+    except PermissionError as exc:
+        path.unlink(missing_ok=True)
+        failed_path = Path(getattr(exc, "filename", "") or root)
+        raise RuntimeError(
+            "バックアップを作成できません。Agent実行ユーザーにサーバーフォルダまたはバックアップ保存先への権限がありません。"
+            f"失敗したパス: {_safe_error_path(root, failed_path)}"
+        ) from exc
+    except OSError as exc:
+        path.unlink(missing_ok=True)
+        failed_path = Path(getattr(exc, "filename", "") or root)
+        raise RuntimeError(
+            "バックアップを作成できません。ファイルがロックされているか、読み取り権限が不足しています。"
+            f"失敗したパス: {_safe_error_path(root, failed_path)}"
+        ) from exc
     if kind == "scheduled":
         _prune_scheduled_backups(backup_dir, int(payload.get("retention_count") or 7))
-    return {"backup": _backup_info(path, kind=kind), "message": "Backup created."}
+    return {"backup": _backup_info(path, kind=kind, mode=mode), "mode": mode, "message": "バックアップを作成しました。"}
 
 
 def list_backups(payload: dict[str, Any]) -> dict[str, Any]:
     server_id = str(payload["server_id"])
     backup_dir = _backup_dir(server_id)
     backup_dir.mkdir(parents=True, exist_ok=True)
-    backups = [_backup_info(path, kind=_kind_from_backup_id(path.stem)) for path in sorted(backup_dir.glob("*.zip"), reverse=True)]
+    backups = [
+        _backup_info(path, kind=_kind_from_backup_id(path.stem), mode="cold")
+        for path in sorted(backup_dir.glob("*.zip"), reverse=True)
+    ]
     return {"backups": backups}
 
 
@@ -439,21 +458,35 @@ def _agent_data_dir() -> Path:
     return default_config_path().parent / "data"
 
 
-def _should_exclude_from_backup(root: Path, path: Path) -> bool:
+def _write_backup_zip(root: Path, path: Path, *, include_crash_reports: bool) -> None:
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for item in root.rglob("*"):
+            if _should_exclude_from_backup(root, item, include_crash_reports=include_crash_reports):
+                continue
+            if item.is_file():
+                archive.write(item, item.relative_to(root).as_posix())
+
+
+def _should_exclude_from_backup(root: Path, path: Path, *, include_crash_reports: bool = False) -> bool:
     if path.is_symlink():
         return True
     relative = path.relative_to(root)
     first = relative.parts[0] if relative.parts else ""
+    if first == "crash-reports" and include_crash_reports:
+        return False
     if first in BACKUP_EXCLUDED_ROOTS:
+        return True
+    if path.name.lower() in BACKUP_EXCLUDED_FILES:
         return True
     return path.suffix.lower() in BACKUP_EXCLUDED_SUFFIXES
 
 
-def _backup_info(path: Path, *, kind: str) -> dict[str, Any]:
+def _backup_info(path: Path, *, kind: str, mode: str = "cold") -> dict[str, Any]:
     return {
         "backup_id": path.stem,
         "filename": path.name,
         "kind": kind,
+        "mode": mode,
         "created_at": _format_timestamp(path.stat().st_mtime) or datetime.now(timezone.utc).isoformat(),
         "size_bytes": path.stat().st_size,
         "status": "available",
@@ -489,6 +522,16 @@ def _sanitize_plugin_filename(filename: str) -> str:
 
 def _safe_id(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip(".-_") or "item"
+
+
+def _safe_error_path(root: Path, path: Path) -> str:
+    try:
+        resolved = path.expanduser().resolve(strict=False)
+        if _is_inside(root, resolved):
+            return resolved.relative_to(root).as_posix()
+    except OSError:
+        pass
+    return path.name or str(path)
 
 
 def _timestamp() -> str:

@@ -16,6 +16,9 @@ def resolve_api_base_url() -> str:
 
 
 def default_config_path() -> Path:
+    configured = os.environ.get("MCCTL_AGENT_CONFIG")
+    if configured:
+        return Path(configured).expanduser()
     if platform.system().lower() == "windows":
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
         return base / "mcctl" / "agent.json"
