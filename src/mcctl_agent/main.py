@@ -39,6 +39,17 @@ from mcctl_agent.java import detect_java_installations
 from mcctl_agent.minecraft import inspect_server_directory
 from mcctl_agent.operations import OperationRegistry
 from mcctl_agent.runtime import ServerRuntimeManager
+from mcctl_agent.server_setup import (
+    check_port,
+    create_directory,
+    create_minecraft_server,
+    detect_java,
+    get_agent_capabilities,
+    list_directories,
+    list_minecraft_versions,
+    list_server_builds,
+    validate_server_directory,
+)
 
 
 runtime_manager = ServerRuntimeManager()
@@ -291,6 +302,32 @@ async def handle_websocket_message(websocket, send_lock: asyncio.Lock, message: 
 async def dispatch_command(command: str, payload: dict) -> dict:
     if command == "detect_java_installations":
         return {"java_candidates": [candidate.to_dict() for candidate in detect_java_installations()]}
+    if command == "detect_java":
+        required_major = payload.get("required_major")
+        return detect_java(int(required_major) if required_major else None)
+    if command == "get_agent_capabilities":
+        return get_agent_capabilities(AgentConfig.load(default_config_path()).allowed_roots)
+    if command == "list_directories":
+        return list_directories(payload, AgentConfig.load(default_config_path()).allowed_roots)
+    if command == "create_directory":
+        return create_directory(payload, AgentConfig.load(default_config_path()).allowed_roots)
+    if command == "validate_server_directory":
+        return validate_server_directory(payload, AgentConfig.load(default_config_path()).allowed_roots)
+    if command == "list_minecraft_versions":
+        return await asyncio.to_thread(list_minecraft_versions, payload)
+    if command == "list_server_builds":
+        return await asyncio.to_thread(list_server_builds, payload)
+    if command == "check_port":
+        return check_port(payload)
+    if command == "create_minecraft_server":
+        return operation_registry.start(
+            "minecraft server setup",
+            lambda: asyncio.to_thread(
+                create_minecraft_server,
+                payload,
+                AgentConfig.load(default_config_path()).allowed_roots,
+            ),
+        )
     if command == "inspect_server_directory":
         return inspect_server_directory(str(payload.get("root_path") or ""))
     if command == "start_server":

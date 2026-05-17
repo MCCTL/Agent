@@ -105,6 +105,23 @@ The pairing token expires after 10 minutes and can only be used once. If it expi
 
 After pairing, the agent stores its agent token locally and uses it for future WebSocket connections. Treat the agent token as a secret.
 
+## Beginner Server Setup Support
+
+The MCCTL web app can ask the Agent to help create a new Vanilla or Paper server. These are fixed Agent commands, not arbitrary shell execution:
+
+- `detect_java`
+- `list_directories`
+- `create_directory`
+- `validate_server_directory`
+- `list_minecraft_versions`
+- `list_server_builds`
+- `check_port`
+- `create_minecraft_server`
+
+The Agent checks Java, restricts file operations to configured `allowed_roots`, rejects dangerous system paths, writes `eula.txt` only after the user agrees to Minecraft EULA in the web UI, writes beginner `server.properties`, downloads Vanilla or Paper server jars, and reports Japanese cause-specific setup errors back to MCCTL.
+
+Default allowed roots include the user home directory, `~/minecraft`, `/srv/minecraft`, `/opt/minecraft`, and common Windows Minecraft folders. You can add `allowed_roots` to the config file if your server directory should live elsewhere.
+
 ## Token Reset And Re-Pairing
 
 If WebSocket connection is rejected with HTTP 401 or 403, the saved agent token may be invalid. Reset the saved token and pair again:
