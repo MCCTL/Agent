@@ -1,7 +1,15 @@
 from pathlib import Path
 
 from mcctl_agent.config import DEFAULT_API_BASE_URL, AgentConfig, resolve_api_base_url
-from mcctl_agent.main import print_agent_status, reset_agent_config, warn_for_insecure_api
+from mcctl_agent.main import (
+    agent_metadata_headers,
+    print_agent_status,
+    print_agent_version,
+    print_update_guidance,
+    reset_agent_config,
+    update_guidance,
+    warn_for_insecure_api,
+)
 
 
 def test_default_api_base_url_points_to_production(monkeypatch):
@@ -54,6 +62,33 @@ def test_status_hides_saved_token(tmp_path, capsys):
     assert "device-1" in output
     assert "Token saved: yes" in output
     assert "secret-token" not in output
+
+
+def test_version_and_update_commands_do_not_print_tokens(capsys):
+    print_agent_version()
+    print_update_guidance()
+
+    output = capsys.readouterr().out
+    assert "MCCTL Agent" in output
+    assert "pipx install git+https://github.com/MCCTL/Agent.git" in output
+    assert "token" not in output.lower()
+
+
+def test_update_guidance_has_platform_specific_commands():
+    assert "py -m pipx install" in update_guidance("Windows")
+    assert "~/.local/bin/mcctl-agent" in update_guidance("Linux")
+
+
+def test_agent_metadata_headers_include_runtime_without_token(monkeypatch):
+    monkeypatch.setenv("MCCTL_AGENT_INSTALL_METHOD", "pipx-test")
+
+    headers = agent_metadata_headers()
+
+    assert headers["X-MCCTL-Agent-Version"]
+    assert headers["X-MCCTL-Agent-Platform"]
+    assert headers["X-MCCTL-Agent-Python-Version"]
+    assert headers["X-MCCTL-Agent-Install-Method"] == "pipx-test"
+    assert all("token" not in value.lower() for value in headers.values())
 
 
 def test_insecure_api_warning_is_only_for_non_https(capsys):

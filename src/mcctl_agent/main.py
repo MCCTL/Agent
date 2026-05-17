@@ -68,6 +68,8 @@ def main() -> None:
     parser.add_argument("--api-url", default=resolve_api_base_url())
     parser.add_argument("--config", type=Path, default=default_config_path())
     subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("version", help="show the installed agent version")
+    subparsers.add_parser("update", help="show safe manual update steps")
     subparsers.add_parser("reset", help="clear saved agent token and device information")
     subparsers.add_parser("status", help="show local agent configuration without printing secrets")
     autostart_parser = subparsers.add_parser("autostart", help="manage Windows logon autostart")
@@ -77,6 +79,12 @@ def main() -> None:
     autostart_subparsers.add_parser("status", help="show Windows autostart status")
     args = parser.parse_args()
 
+    if args.command == "version":
+        print_agent_version()
+        return
+    if args.command == "update":
+        print_update_guidance()
+        return
     if args.command == "reset":
         reset_agent_config(args.config)
         return
@@ -129,6 +137,59 @@ def print_agent_status(config_path: Path, api_base_url: str) -> None:
     print(f"Config path: {config_path}")
     print(f"Token saved: {'yes' if config.agent_token else 'no'}")
     print("Token value: hidden")
+
+
+def print_agent_version() -> None:
+    print(f"MCCTL Agent {agent_version()}")
+    print(f"Platform: {platform.system() or 'unknown'}")
+    print(f"Python: {platform.python_version()}")
+
+
+def update_guidance(system: str | None = None) -> str:
+    current_system = (system or platform.system()).lower()
+    if current_system == "windows":
+        return "\n".join(
+            [
+                "MCCTL Agent update steps for Windows:",
+                "py -m pipx uninstall mcctl-agent",
+                "py -m pipx install git+https://github.com/MCCTL/Agent.git",
+                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe"',
+                "",
+                "If Windows autostart is enabled:",
+                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" autostart uninstall',
+                "py -m pipx uninstall mcctl-agent",
+                "py -m pipx install git+https://github.com/MCCTL/Agent.git",
+                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" autostart install',
+            ]
+        )
+    return "\n".join(
+        [
+            "MCCTL Agent update steps for Linux:",
+            "pipx uninstall mcctl-agent",
+            "pipx install git+https://github.com/MCCTL/Agent.git",
+            "~/.local/bin/mcctl-agent",
+            "",
+            "If systemd is enabled:",
+            "sudo systemctl stop mcctl-agent",
+            "pipx uninstall mcctl-agent",
+            "pipx install git+https://github.com/MCCTL/Agent.git",
+            "sudo systemctl start mcctl-agent",
+            "sudo systemctl status mcctl-agent",
+        ]
+    )
+
+
+def print_update_guidance() -> None:
+    print(update_guidance())
+
+
+def agent_metadata_headers() -> dict[str, str]:
+    return {
+        "X-MCCTL-Agent-Version": agent_version(),
+        "X-MCCTL-Agent-Platform": platform.system() or "unknown",
+        "X-MCCTL-Agent-Python-Version": platform.python_version(),
+        "X-MCCTL-Agent-Install-Method": os.environ.get("MCCTL_AGENT_INSTALL_METHOD", "pipx"),
+    }
 
 
 def handle_autostart(command: str) -> None:
@@ -201,7 +262,7 @@ async def connect_websocket(config: AgentConfig, config_path: Path) -> None:
                 url,
                 additional_headers={
                     "X-MCCTL-Agent-Token": config.agent_token,
-                    "X-MCCTL-Agent-Version": agent_version(),
+                    **agent_metadata_headers(),
                 },
                 ping_interval=None,
             ) as websocket:

@@ -91,6 +91,20 @@ Check the local configuration without printing secrets:
 mcctl-agent status
 ```
 
+Show the installed version:
+
+```bash
+mcctl-agent version
+```
+
+Show safe manual update steps:
+
+```bash
+mcctl-agent update
+```
+
+The agent sends its version, platform, Python version, and install method to MCCTL when it connects. It never prints the saved agent token in `status`, `version`, or `update`.
+
 ## Pairing
 
 When the agent starts without a saved token, it prints a pairing URL and code.
