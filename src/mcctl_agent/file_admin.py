@@ -23,6 +23,7 @@ ROOT_EDITABLE_FILES = {
     "permissions.yml",
 }
 EDITABLE_DIRS = {"config", "plugins"}
+ADDON_DIRECTORIES = {"plugins", "mods"}
 MAX_TEXT_FILE_BYTES = 512 * 1024
 MAX_PLUGIN_BYTES = 67_108_864
 BACKUP_EXCLUDED_ROOTS = {"backups", "logs", "cache", "crash-reports"}
@@ -39,7 +40,8 @@ class SafeTarget:
 
 def list_plugins(payload: dict[str, Any]) -> dict[str, Any]:
     root = _safe_root(payload["root_path"])
-    plugins_dir = _safe_child(root, "plugins", must_exist=False)
+    addon_directory = _addon_directory(payload)
+    plugins_dir = _safe_child(root, addon_directory, must_exist=False)
     plugins_dir.mkdir(parents=True, exist_ok=True)
     plugins = []
     for path in sorted([*plugins_dir.glob("*.jar"), *plugins_dir.glob("*.jar.disabled")], key=lambda item: item.name.lower()):
@@ -51,7 +53,8 @@ def list_plugins(payload: dict[str, Any]) -> dict[str, Any]:
 
 async def install_uploaded_plugin(payload: dict[str, Any]) -> dict[str, Any]:
     root = _safe_root(payload["root_path"])
-    plugins_dir = _safe_child(root, "plugins", must_exist=False)
+    addon_directory = _addon_directory(payload)
+    plugins_dir = _safe_child(root, addon_directory, must_exist=False)
     plugins_dir.mkdir(parents=True, exist_ok=True)
     filename = _sanitize_plugin_filename(str(payload.get("filename") or "plugin.jar"))
     if not filename.lower().endswith(".jar"):
@@ -60,8 +63,8 @@ async def install_uploaded_plugin(payload: dict[str, Any]) -> dict[str, Any]:
     target_name = _sanitize_plugin_filename(target_plugin_id) if target_plugin_id else filename
     if not target_name.lower().endswith((".jar", ".jar.disabled")):
         raise RuntimeError("Target plugin must be a jar file.")
-    target_path = _safe_child(root, f"plugins/{target_name}", must_exist=False)
-    temp_path = _safe_child(root, f"plugins/.{filename}.{datetime.now(timezone.utc).timestamp()}.mcctl-upload", must_exist=False)
+    target_path = _safe_child(root, f"{addon_directory}/{target_name}", must_exist=False)
+    temp_path = _safe_child(root, f"{addon_directory}/.{filename}.{datetime.now(timezone.utc).timestamp()}.mcctl-upload", must_exist=False)
 
     download_url = str(payload["download_url"])
     size = 0
@@ -98,8 +101,9 @@ async def install_uploaded_plugin(payload: dict[str, Any]) -> dict[str, Any]:
 
 def enable_plugin(payload: dict[str, Any]) -> dict[str, Any]:
     root = _safe_root(payload["root_path"])
+    addon_directory = _addon_directory(payload)
     plugin_id = _sanitize_plugin_filename(str(payload["plugin_id"]))
-    source = _safe_child(root, f"plugins/{plugin_id}", must_exist=True)
+    source = _safe_child(root, f"{addon_directory}/{plugin_id}", must_exist=True)
     if not source.name.endswith(".jar.disabled"):
         return {
             "plugin_id": source.name,
@@ -125,8 +129,9 @@ def enable_plugin(payload: dict[str, Any]) -> dict[str, Any]:
 
 def disable_plugin(payload: dict[str, Any]) -> dict[str, Any]:
     root = _safe_root(payload["root_path"])
+    addon_directory = _addon_directory(payload)
     plugin_id = _sanitize_plugin_filename(str(payload["plugin_id"]))
-    source = _safe_child(root, f"plugins/{plugin_id}", must_exist=True)
+    source = _safe_child(root, f"{addon_directory}/{plugin_id}", must_exist=True)
     if source.name.endswith(".jar.disabled"):
         return {
             "plugin_id": source.name,
@@ -298,6 +303,13 @@ def _plugin_info(path: Path) -> dict[str, Any]:
         "pending_state": "none",
         "metadata_error": metadata_error,
     }
+
+
+def _addon_directory(payload: dict[str, Any]) -> str:
+    value = str(payload.get("addon_directory") or "plugins").strip().lower()
+    if value not in ADDON_DIRECTORIES:
+        return "plugins"
+    return value
 
 
 def _read_plugin_metadata(path: Path) -> tuple[dict[str, str], str | None]:

@@ -4,12 +4,17 @@ import platform
 import socket
 from dataclasses import dataclass
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
 
-AGENT_VERSION = "0.1.0"
+def agent_version() -> str:
+    try:
+        return version("mcctl-agent")
+    except PackageNotFoundError:
+        return "0.0.0"
 
 
 @dataclass(frozen=True)
@@ -29,7 +34,7 @@ async def create_pairing_session(api_base_url: str, agent_fingerprint: str) -> P
                 "device_name": socket.gethostname(),
                 "os_name": platform.system(),
                 "hostname": socket.gethostname(),
-                "agent_version": AGENT_VERSION,
+                "agent_version": agent_version(),
                 "agent_fingerprint": agent_fingerprint,
             },
         )

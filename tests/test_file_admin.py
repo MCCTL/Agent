@@ -45,6 +45,20 @@ def test_plugin_jar_detection_and_metadata(tmp_path: Path) -> None:
     assert disabled["enabled"] is False
 
 
+def test_mod_jar_detection_uses_mods_directory(tmp_path: Path) -> None:
+    mods = tmp_path / "mods"
+    plugins = tmp_path / "plugins"
+    mods.mkdir()
+    plugins.mkdir()
+    make_plugin(mods / "ExampleMod.jar", "ExampleMod")
+    make_plugin(plugins / "IgnoredPlugin.jar", "IgnoredPlugin")
+
+    result = list_plugins({"root_path": str(tmp_path), "addon_directory": "mods"})
+
+    assert [item["filename"] for item in result["plugins"]] == ["ExampleMod.jar"]
+    assert result["plugins"][0]["display_name"] == "ExampleMod"
+
+
 def test_plugin_enable_disable_uses_rename(tmp_path: Path) -> None:
     plugins = tmp_path / "plugins"
     plugins.mkdir()
@@ -58,6 +72,21 @@ def test_plugin_enable_disable_uses_rename(tmp_path: Path) -> None:
     assert enabled["filename"] == "Example.jar"
     assert enabled["pending_state"] == "restart_required"
     assert (plugins / "Example.jar").exists()
+
+
+def test_mod_enable_disable_uses_mods_directory(tmp_path: Path) -> None:
+    mods = tmp_path / "mods"
+    mods.mkdir()
+    make_plugin(mods / "ExampleMod.jar", "ExampleMod")
+
+    disabled = disable_plugin({"root_path": str(tmp_path), "addon_directory": "mods", "plugin_id": "ExampleMod.jar"})
+    enabled = enable_plugin(
+        {"root_path": str(tmp_path), "addon_directory": "mods", "plugin_id": "ExampleMod.jar.disabled"}
+    )
+
+    assert disabled["filename"] == "ExampleMod.jar.disabled"
+    assert enabled["filename"] == "ExampleMod.jar"
+    assert (mods / "ExampleMod.jar").exists()
 
 
 def test_editable_file_read_write_and_backup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
