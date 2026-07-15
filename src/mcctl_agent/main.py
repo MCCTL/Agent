@@ -81,6 +81,7 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("version", help="show the installed agent version")
     subparsers.add_parser("update", help="show safe manual update steps")
+    subparsers.add_parser("pair", help="pair this device, save its token, and exit")
     subparsers.add_parser("reset", help="clear saved agent token and device information")
     subparsers.add_parser("status", help="show local agent configuration without printing secrets")
     autostart_parser = subparsers.add_parser("autostart", help="manage Windows logon autostart")
@@ -103,6 +104,16 @@ def main() -> None:
         return
     if args.command == "update":
         print_update_guidance()
+        return
+    if args.command == "pair":
+        config = AgentConfig.load(args.config)
+        config.api_base_url = args.api_url
+        config.save(args.config)
+        warn_for_insecure_api(config.api_base_url)
+        if config.agent_token and config.device_id:
+            print("This device is already paired. No changes were made.")
+            return
+        asyncio.run(pair_agent(config, args.config))
         return
     if args.command == "reset":
         reset_agent_config(args.config)
@@ -283,7 +294,7 @@ async def pair_agent(config: AgentConfig, config_path: Path) -> None:
             config.device_id = device_id
             config.agent_token = agent_token
             config.save(config_path)
-            print("Pairing completed. Agent token saved locally.")
+            print("Pairing completed. The device token was saved locally.")
             return
         await asyncio.sleep(2)
     raise RuntimeError("Pairing session expired before it was confirmed.")

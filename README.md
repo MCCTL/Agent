@@ -20,6 +20,16 @@ py -m pipx install git+https://github.com/MCCTL/Agent.git
 & "$env:USERPROFILE\.local\bin\mcctl-agent.exe"
 ```
 
+One-command guided installation, pairing, and background setup:
+
+```powershell
+irm https://mcctl.com/install-agent.ps1 | iex
+```
+
+The script installs the Agent, waits for browser pairing to complete, then installs a Windows
+Service when PowerShell has Administrator rights. Without Administrator rights, it configures
+the per-user logon task instead.
+
 `py -m pipx ensurepath` updates PATH for new PowerShell windows. The current PowerShell may not see `pipx` or `mcctl-agent` yet.
 
 After opening a new PowerShell window, this should work:
@@ -75,6 +85,15 @@ pipx install git+https://github.com/MCCTL/Agent.git
 ~/.local/bin/mcctl-agent
 ```
 
+One-command installation, pairing, and systemd setup:
+
+```bash
+curl -fsSL https://mcctl.com/install-agent.sh | bash
+```
+
+The script uses `sudo` only for package installation and the systemd unit. The Agent itself runs
+as the current non-root user.
+
 If `mcctl-agent: command not found` appears, run the agent with the absolute path:
 
 ```bash
@@ -122,6 +141,13 @@ The agent sends its version, platform, Python version, and install method to MCC
 ## Pairing
 
 When the agent starts without a saved token, it prints a pairing URL and code.
+
+Install scripts use the following command to pair without starting the long-running WebSocket
+process immediately:
+
+```bash
+mcctl-agent pair
+```
 
 1. Open the pairing URL in a browser.
 2. Sign in to MCCTL.

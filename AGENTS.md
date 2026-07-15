@@ -65,9 +65,18 @@ pipx install --force git+https://github.com/MCCTL/Agent.git
 
 ## Windows behavior
 
-Windows autostart uses Task Scheduler.
+Windows background operation uses Windows Service. Task Scheduler is only a fallback when
+Administrator rights are unavailable.
 
-Commands:
+Recommended commands:
+
+```powershell
+mcctl-agent pair
+mcctl-agent service install
+mcctl-agent service start
+```
+
+Fallback commands:
 
 ```powershell
 mcctl-agent autostart install

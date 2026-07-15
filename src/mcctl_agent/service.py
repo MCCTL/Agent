@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 
+from mcctl_agent.autostart import AutostartError, uninstall_windows_autostart, windows_autostart_status
 from mcctl_agent.config import default_config_path
 
 SERVICE_ID = "MCCTLAgent"
@@ -106,6 +107,7 @@ def install_service() -> ServiceResult:
     _copy_user_config_if_needed(config_path)
     _ensure_winsw_binary(service_winsw_exe())
     service_winsw_xml().write_text(build_winsw_config(agent_executable, config_path, log_dir), encoding="utf-8")
+    _remove_legacy_autostart_if_present()
     _run_winsw("install")
     return ServiceResult(
         True,
@@ -179,6 +181,17 @@ def _copy_user_config_if_needed(config_path: Path) -> None:
     if source.exists() and source != config_path:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, config_path)
+
+
+def _remove_legacy_autostart_if_present() -> None:
+    try:
+        if windows_autostart_status().ok:
+            uninstall_windows_autostart()
+    except AutostartError as exc:
+        raise ServiceError(
+            "既存のログオン時起動設定を解除できませんでした。"
+            "`mcctl-agent autostart uninstall` を実行してから再試行してください。"
+        ) from exc
 
 
 def _ensure_winsw_binary(path: Path) -> None:
