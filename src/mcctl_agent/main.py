@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import platform
+import subprocess
 import sys
 import webbrowser
 from datetime import datetime, timezone
@@ -80,7 +81,7 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=default_config_path())
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("version", help="show the installed agent version")
-    subparsers.add_parser("update", help="show safe manual update steps")
+    subparsers.add_parser("update", help="update the Agent from the official public repository")
     subparsers.add_parser("pair", help="pair this device, save its token, and exit")
     subparsers.add_parser("reset", help="clear saved agent token and device information")
     subparsers.add_parser("status", help="show local agent configuration without printing secrets")
@@ -103,7 +104,7 @@ def main() -> None:
         print_agent_version()
         return
     if args.command == "update":
-        print_update_guidance()
+        launch_agent_update()
         return
     if args.command == "pair":
         config = AgentConfig.load(args.config)
@@ -183,44 +184,36 @@ def print_agent_version() -> None:
 def update_guidance(system: str | None = None) -> str:
     current_system = (system or platform.system()).lower()
     if current_system == "windows":
-        return "\n".join(
-            [
-                "MCCTL Agent update steps for Windows:",
-                "py -m pipx uninstall mcctl-agent",
-                "py -m pipx install git+https://github.com/MCCTL/Agent.git",
-                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe"',
-                "",
-                "Recommended Windows Service mode after pairing:",
-                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" service stop',
-                "py -m pipx uninstall mcctl-agent",
-                "py -m pipx install git+https://github.com/MCCTL/Agent.git",
-                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" service install',
-                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" service start',
-                "",
-                "Fallback if administrator rights are unavailable:",
-                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" autostart uninstall',
-                '& "$env:USERPROFILE\\.local\\bin\\mcctl-agent.exe" autostart install',
-            ]
-        )
-    return "\n".join(
-        [
-            "MCCTL Agent update steps for Linux:",
-            "pipx uninstall mcctl-agent",
-            "pipx install git+https://github.com/MCCTL/Agent.git",
-            "~/.local/bin/mcctl-agent",
-            "",
-            "If systemd is enabled:",
-            "sudo systemctl stop mcctl-agent",
-            "pipx uninstall mcctl-agent",
-            "pipx install git+https://github.com/MCCTL/Agent.git",
-            "sudo systemctl start mcctl-agent",
-            "sudo systemctl status mcctl-agent",
-        ]
-    )
+        return "irm https://mcctl.com/install-agent.ps1 | iex"
+    return "curl -fsSL https://mcctl.com/install-agent.sh | bash"
 
 
 def print_update_guidance() -> None:
     print(update_guidance())
+
+
+def launch_agent_update(system: str | None = None) -> None:
+    current_system = (system or platform.system()).lower()
+    command = update_guidance(current_system)
+    print("Starting the MCCTL Agent updater from https://mcctl.com.")
+    print("The updater preserves the saved device configuration and restarts background mode.")
+    if current_system == "windows":
+        subprocess.Popen(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                f"Start-Sleep -Seconds 2; {command}",
+            ]
+        )
+        print("The update will begin in this PowerShell window.")
+        return
+    if current_system in {"linux", "darwin"}:
+        os.execvp("bash", ["bash", "-lc", command])
+        return
+    raise RuntimeError(f"Automatic update is not supported on {system or platform.system()}.")
 
 
 def agent_metadata_headers() -> dict[str, str]:

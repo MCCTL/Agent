@@ -130,11 +130,14 @@ Show the installed version:
 mcctl-agent version
 ```
 
-Show safe manual update steps:
+Update from the official public repository with one command:
 
 ```bash
 mcctl-agent update
 ```
+
+The updater preserves the paired device configuration and restarts Windows Service,
+Task Scheduler fallback, or systemd background operation as applicable.
 
 The agent sends its version, platform, Python version, and install method to MCCTL when it connects. It never prints the saved agent token in `status`, `version`, or `update`.
 

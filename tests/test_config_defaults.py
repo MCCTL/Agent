@@ -3,6 +3,7 @@ from pathlib import Path
 from mcctl_agent.config import DEFAULT_API_BASE_URL, AgentConfig, resolve_api_base_url
 from mcctl_agent.main import (
     agent_metadata_headers,
+    launch_agent_update,
     print_agent_status,
     print_agent_version,
     print_update_guidance,
@@ -70,14 +71,42 @@ def test_version_and_update_commands_do_not_print_tokens(capsys):
 
     output = capsys.readouterr().out
     assert "MCCTL Agent" in output
-    assert "pipx install git+https://github.com/MCCTL/Agent.git" in output
+    assert "https://mcctl.com/install-agent.ps1" in output
     assert "token" not in output.lower()
 
 
 def test_update_guidance_has_platform_specific_commands():
-    assert "py -m pipx install" in update_guidance("Windows")
-    assert "service install" in update_guidance("Windows")
-    assert "~/.local/bin/mcctl-agent" in update_guidance("Linux")
+    assert update_guidance("Windows") == "irm https://mcctl.com/install-agent.ps1 | iex"
+    assert update_guidance("Linux") == "curl -fsSL https://mcctl.com/install-agent.sh | bash"
+
+
+def test_windows_update_launches_official_one_command_updater(monkeypatch):
+    captured = {}
+
+    def fake_popen(command):
+        captured["command"] = command
+
+    monkeypatch.setattr("mcctl_agent.main.subprocess.Popen", fake_popen)
+
+    launch_agent_update("Windows")
+
+    assert captured["command"][0] == "powershell.exe"
+    assert "https://mcctl.com/install-agent.ps1" in captured["command"][-1]
+
+
+def test_linux_update_replaces_process_with_official_updater(monkeypatch):
+    captured = {}
+
+    def fake_execvp(executable, command):
+        captured["executable"] = executable
+        captured["command"] = command
+
+    monkeypatch.setattr("mcctl_agent.main.os.execvp", fake_execvp)
+
+    launch_agent_update("Linux")
+
+    assert captured["executable"] == "bash"
+    assert captured["command"][-1] == "curl -fsSL https://mcctl.com/install-agent.sh | bash"
 
 
 def test_config_path_can_be_overridden_for_service(monkeypatch, tmp_path):
