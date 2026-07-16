@@ -139,6 +139,11 @@ mcctl-agent update
 The updater preserves the paired device configuration and restarts Windows Service,
 Task Scheduler fallback, or systemd background operation as applicable.
 
+Install and update scripts show a compact progress bar and estimated remaining time. Dependency
+installer output is hidden during normal operation and printed only when a step fails. On Windows,
+the updater removes an older direct `pip` installation that could shadow the current pipx launcher;
+`mcctl-agent status` also displays the executable path used by the current command.
+
 The agent sends its version, platform, Python version, and install method to MCCTL when it connects. It never prints the saved agent token in `status`, `version`, or `update`.
 
 ## Pairing

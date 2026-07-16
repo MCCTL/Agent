@@ -165,6 +165,7 @@ def print_agent_status(config_path: Path, api_base_url: str) -> None:
     configured = bool(config.agent_token and config.device_id)
     print("MCCTL Agent status")
     print(f"Version: {agent_version()}")
+    print(f"Executable: {Path(sys.argv[0]).resolve()}")
     print(f"Configured: {'yes' if configured else 'no'}")
     print(f"Device ID: {config.device_id or 'not paired'}")
     print(f"API URL: {api_base_url}")
@@ -195,8 +196,7 @@ def print_update_guidance() -> None:
 def launch_agent_update(system: str | None = None) -> None:
     current_system = (system or platform.system()).lower()
     command = update_guidance(current_system)
-    print("Starting the MCCTL Agent updater from https://mcctl.com.")
-    print("The updater preserves the saved device configuration and restarts background mode.")
+    print("Opening the MCCTL Agent updater. Saved device settings will be preserved.")
     if current_system == "windows":
         subprocess.Popen(
             [
@@ -208,7 +208,7 @@ def launch_agent_update(system: str | None = None) -> None:
                 f"Start-Sleep -Seconds 2; {command}",
             ]
         )
-        print("The update will begin in this PowerShell window.")
+        print("Follow the progress shown in the updater window.")
         return
     if current_system in {"linux", "darwin"}:
         os.execvp("bash", ["bash", "-lc", command])

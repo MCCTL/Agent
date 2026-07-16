@@ -2,6 +2,7 @@ from pathlib import Path
 
 from mcctl_agent.config import DEFAULT_API_BASE_URL, AgentConfig, resolve_api_base_url
 from mcctl_agent.main import (
+    agent_version,
     agent_metadata_headers,
     launch_agent_update,
     print_agent_status,
@@ -11,6 +12,10 @@ from mcctl_agent.main import (
     update_guidance,
     warn_for_insecure_api,
 )
+
+
+def test_package_metadata_reports_release_version():
+    assert agent_version() == "0.1.4"
 
 
 def test_default_api_base_url_points_to_production(monkeypatch):
@@ -62,6 +67,7 @@ def test_status_hides_saved_token(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "device-1" in output
     assert "Token saved: yes" in output
+    assert "Executable:" in output
     assert "secret-token" not in output
 
 
